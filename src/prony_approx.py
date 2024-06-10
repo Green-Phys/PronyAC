@@ -8,7 +8,7 @@ class PronyApprox:
     
     def __init__(self, h_k, a = 0, b = 1):
         '''
-        Initialize with an odd number of function values sampled on the uniform grid from a to b.
+        Initialize with an odd number of function values sampled on a uniform grid from a to b.
         '''
         if h_k.size % 2 != 1:
             raise Exception("number of sampling points must be odd!")
@@ -26,10 +26,10 @@ class PronyApprox:
         self.H = np.zeros((self.N + 1, self.N + 1), dtype=self.h_k.dtype)
         for row in range(self.N + 1):
             self.H[row, :] = self.h_k[row : (row + self.N + 1)]
-
+        
         S, V = svd(self.H)
-        self.S = S[:min(3 * int(np.log(1.e12)), int(0.8 * S.size))]
-        self.V = V[:, :min(3 * int(np.log(1.e12)), int(0.8 * S.size))]
+        self.S = S
+        self.V = V
     
     def find_idx_with_err(self, err):
         '''
@@ -49,70 +49,62 @@ class PronyApprox:
         '''
         Find the maximum index for the exponentially decaying region.
         '''
-        from scipy.optimize import curve_fit
-        
-        n_max = self.S.size
+        n_max = min(3 * int(np.log(1.e12)), int(0.8 * self.S.size))
         idx_fit = np.arange(int(0.8 * n_max), n_max)
         val_fit = self.S[idx_fit]
         
-        try:
-            param, param_cov = curve_fit(lambda x, a, b : a * x + b, idx_fit, val_fit)
-            self.S_approx = param[0] * np.arange(n_max) + param[1]
-            idx = sum(self.S > 10.0 * self.S_approx) - 1
-        except:
-            idx = self.S.size - 1
+        A = np.vstack((idx_fit, np.ones_like(idx_fit))).T
+        a, b = np.linalg.pinv(A) @ np.log(val_fit)
+        self.S_approx = np.exp(a * np.arange(n_max) + b)
+        idx = sum(self.S[:n_max] > 5.0 * self.S_approx) + 1
         
         return idx
     
     def find_v_with_idx(self, idx):
         '''
-        Find the c-eigenpair for the given index idx. 
+        Find the c-eigenpair for the given index idx.
         '''
         if idx >= self.S.size:
             raise Exception("index is invalid!")
-
+        
         self.idx = idx
         self.sigma = self.S[idx]
         self.v = self.V[:, idx]
     
-    def find_approx(self, full = False, f = None, x_min = 0, x_max = 0, y_min = 0, y_max = 0):
+    def find_approx(self, full = False, cutoff = 1.0, keep_largest = True):
         '''
-        Find Prony's approximation. 
-        If full is False, only nodes strictly inside the unit disk will be considered; otherwise, all nodes will be considered. It is suggested to keep it False. 
-        If function f is provided, then only nodes gamma with f(gamma).real in (x_min, x_max) and f(gamma).imag in (y_min, y_max) will be considered.
+        Find Prony's approximation.
+        If full is False, only nodes with modulus smaller than cutoff will be considered; otherwise, all nodes will be considered. It is suggested to keep it False.
         '''
-        self.find_gamma(full)
-        if f is not None:
-            self.cut_gamma_with_map(f, x_min, x_max, y_min, y_max)
+        self.find_gamma(full=full, cutoff=cutoff)
         self.find_omega()
+        if keep_largest:
+            idx_sort = np.argsort(np.abs(self.omega))[::-1][:self.idx]
+            self.omega = self.omega[idx_sort]
+            self.gamma = self.gamma[idx_sort]
+        h_k_approx = self.get_value(self.x_k)
+        self.err_max = np.abs(h_k_approx - self.h_k).max()
+        self.err_ave = np.abs(h_k_approx - self.h_k).mean()
     
-    def find_approx_opt(self, full = False, f = None, x_min = 0, x_max = 0, y_min = 0, y_max = 0):
+    def find_approx_opt(self, full = False, cutoff = 1.0):
         '''
         Find the optimal Prony's approximation.
-        If full is False, only nodes strictly inside the unit disk will be considered; otherwise, all nodes will be considered. It is suggested to keep it False.
-        If function f is provided, then only nodes gamma with f(gamma).real in (x_min, x_max) and f(gamma).imag in (y_min, y_max) will be considered.
+        If full is False, only nodes with modulus smaller than cutoff will be considered; otherwise, all nodes will be considered. It is suggested to keep it False.
         '''
         idx_exp = self.find_idx_with_exp_decay()
         err_exp = self.S[idx_exp]
         idx_list = np.arange(self.find_idx_with_err(1000 * err_exp), min(idx_exp + 10, self.S.size))
-        var_list = np.zeros(idx_list.shape, dtype=np.float64)
-        pole_list = np.zeros(idx_list.shape, dtype=np.int32)
-
+        err_list = np.zeros(idx_list.shape, dtype=np.float64)
+        
         for i in range(idx_list.size):
             idx = idx_list[i]
             self.find_v_with_idx(idx)
-            self.find_approx()
-            approx = self.get_value(self.x_k)
-            var_list[i]  = np.sqrt(np.var(np.abs(approx - self.h_k)))
-            pole_list[i] = self.omega.size
-
-        idx_c = pole_list < idx_list + 20
-        idx_cut = idx_list[idx_c]
-        var_cut = var_list[idx_c]
-
-        idx_f = idx_cut[np.argmin(var_cut)]
+            self.find_approx(full=full, cutoff=cutoff, keep_largest=True)
+            err_list[i]  = self.err_ave
+        
+        idx_f = idx_list[np.argmin(err_list)]
         self.find_v_with_idx(idx_f)
-        self.find_approx(full=full, f=f, x_min=x_min, x_max=x_max, y_min=y_min, y_max=y_max)
+        self.find_approx(full=full, cutoff=cutoff, keep_largest=True)
     
     def find_roots(self, u):
         '''
@@ -120,27 +112,18 @@ class PronyApprox:
         '''
         return np.roots(u[::-1])
     
-    def find_gamma(self, full = False):
+    def find_gamma(self, full = False, cutoff = 1.0):
         '''
-        Find nodes gamma. 
+        Find nodes gamma.
         It is suggested that full is always set to be False, so that Prony's approximation always keeps stable. 
         However, this requires that the function to be approximated has decaying magnitude. For our method, this condition is always satisfied.
         '''
         import warnings
         self.gamma = self.find_roots(self.v)
         if not full:
-            self.gamma = self.gamma[np.abs(self.gamma) < 1.0]
+            self.gamma = self.gamma[np.abs(self.gamma) < cutoff]
         else:
             warnings.warn("Prony method is unstable when calculating weights of full nodes and may fail starting from around sigma = 10^-7")
-    
-    def cut_gamma_with_map(self, f, x_min, x_max, y_min, y_max):
-        '''
-        Do cutoff for nodes gamma so that f(gamma).real in (x_min, x_max) and f(gamma).imag in (y_min, y_max).
-        '''
-        assert x_min < x_max and y_min < y_max
-        idx_x = np.logical_and(f(self.gamma).real > x_min, f(self.gamma).real < x_max)
-        idx_y = np.logical_and(f(self.gamma).imag > y_min, f(self.gamma).imag < y_max)
-        self.gamma = self.gamma[np.logical_and(idx_x, idx_y)]
     
     def find_omega(self):
         '''
@@ -157,6 +140,9 @@ class PronyApprox:
         Get the approximated function value at point x.
         '''
         x0 = (x - self.a) / (self.b - self.a)
+        if np.any(x0 < -1.e-12) or np.any(x0 > 1.0 + 1.e-12):
+            raise Exception("Prony approximation only has error control for x in [x_min, x_max]!")
+        
         if np.isscalar(x0):
             A = self.gamma ** (2 * self.N * x0)
             value = np.dot(A, self.omega)
