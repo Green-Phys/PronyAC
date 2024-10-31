@@ -1,5 +1,7 @@
 # PronyAC
-This is a Python program for performing Prony Analytic Continuation.
+This is a Python program for performing Prony Analytic Continuation, as described in [Phys. Rev. B 110, 035154 (2024)](https://doi.org/10.1103/PhysRevB.110.035154).
+
+🚨 **Important**: A more stable implementation is now available at [Green-Phys/MiniPole](https://github.com/Green-Phys/MiniPole), where all future updates will be maintained. Compared to PronyAC, MiniPole can automatically determine $n_0$, uses a more stable ESPRIT algorithm instead of the Prony approximation, and supports multiple orbital cases.
 
 The input of the simulation is the Matsubara data $G(i \omega_n)$ sampled on a uniform grid $\lbrace i\omega_{n_0}, i\omega_{n_0 + \Delta n}, \cdots, i\omega_{n_0 + (N_{\omega}-1) \Delta n} \rbrace$, where  $\omega_n=\frac{(2n+1)\pi}{\beta}$ for fermions and $\frac{2n\pi}{\beta}$ for bosons, $n_0 \geq 0$, $\Delta n \geq 1$ and $N_{\omega}$ is the total number of sampling points.
 
@@ -21,5 +23,4 @@ Note: parameters 6 to 10 are rarely used in most cases. If there is no strong mo
 
 The results are stored in variables *pole_weight* and *pole_location*. The instance method *check_valid()* is provided for checking intermediate steps.
 
-Other classes and functions are also provided to facilitate testings of toy models. The "examples" folder contains all original data of 
-https://doi.org/10.48550/arXiv.2312.10576 and corresponding scripts to generate them.
+Other classes and functions are also provided to facilitate testings of toy models. The "examples" folder contains original data of [Phys. Rev. B 110, 035154 (2024)](https://doi.org/10.1103/PhysRevB.110.035154) and corresponding scripts to generate them.
